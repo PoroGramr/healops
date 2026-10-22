@@ -1,10 +1,28 @@
 import os
+import threading
 import time
 
 import docker
 import httpx
 
 from healops_worker.monitor import managed, normalize
+
+
+def event_listener(client, names: set[str], wake: threading.Event):
+    """Events only trigger a new poll; they never directly authorize a Docker action."""
+    while True:
+        try:
+            stream = client.events(
+                decode=True, filters={"type": "container", "container": sorted(names)}
+            )
+            for item in stream:
+                actor_name = (item.get("Actor") or {}).get("Attributes", {}).get("name")
+                if actor_name in names:
+                    wake.set()
+            time.sleep(3)
+        except docker.errors.DockerException as exc:
+            print(f"event stream reconnecting: {type(exc).__name__}", flush=True)
+            time.sleep(3)
 
 
 def execute_restart(client, plan: dict, names: set[str]) -> dict:
@@ -79,6 +97,10 @@ def main():
     token = os.environ["HEALOPS_WORKER_TOKEN"]
     auto_restart = os.getenv("HEALOPS_AUTO_RESTART", "false").lower() == "true"
     client = docker.from_env()
+    wake = threading.Event()
+    threading.Thread(
+        target=event_listener, args=(client, names, wake), daemon=True
+    ).start()
     with httpx.Client(
         base_url=os.getenv("HEALOPS_API_URL", "http://127.0.0.1:8000"),
         headers={"Authorization": f"Bearer {token}"},
@@ -89,7 +111,8 @@ def main():
                 run_once(client, api, names, auto_restart)
             except (httpx.HTTPError, docker.errors.DockerException) as exc:
                 print(f"poll failed: {type(exc).__name__}", flush=True)
-            time.sleep(5)
+            wake.wait(timeout=5)
+            wake.clear()
 
 
 if __name__ == "__main__":

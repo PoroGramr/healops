@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from healops_worker.main import execute_restart
+from healops_worker.main import event_listener, execute_restart
 from healops_worker.monitor import classify, normalize
 
 
@@ -14,6 +14,24 @@ def test_event_classification():
     assert not classify(
         {"State": {"Status": "running", "Health": {"Status": "healthy"}}}
     )
+
+
+def test_event_filter_and_wakeup():
+    wake = Mock()
+
+    def stream():
+        yield {"Actor": {"Attributes": {"name": "unregistered"}}}
+        yield {"Actor": {"Attributes": {"name": "healops-broken-app"}}}
+        raise RuntimeError("stop test listener")
+
+    client = Mock()
+    client.events.return_value = stream()
+    with pytest.raises(RuntimeError, match="stop test listener"):
+        event_listener(client, {"healops-broken-app"}, wake)
+    client.events.assert_called_once_with(
+        decode=True, filters={"type": "container", "container": ["healops-broken-app"]}
+    )
+    wake.set.assert_called_once()
 
 
 def test_normalize_health_event():

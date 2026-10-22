@@ -6,13 +6,13 @@
 
 ## What works today
 
-- Five-second polling of an explicit Docker container allowlist: status, exit codes, health checks and recent logs. Active incident deduplication and SQLite audit events.
+- Docker Events wakeup plus five-second reconciliation of an explicit container allowlist: status, exit codes, health checks and recent logs. Active incident deduplication and SQLite audit events.
 - LangGraph diagnosis subgraph with rules fallback; optional OpenAI-compatible LLM via `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`. The model never selects or executes commands.
 - React/Vite dark dashboard with authenticated live statistics, containers, incidents, AI findings, approval queue and runtime settings.
 - Explicit administrator approval and an **additional default-off restart switch** before the worker can claim a structured Docker restart. Basic Docker health/stability verification.
 - Alembic schema, a local broken-app demo, automated Python/React tests and GitHub Actions CI.
 
-**Not implemented:** Docker Events subscription, metrics/deployment history, HTTP recovery checks, Codex worktree patching, GitHub PRs, code diff review, redeployment, rollback, automatic retries/circuit breaker, Kubernetes adapter. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
+**Not implemented:** metrics/deployment history, HTTP recovery checks, Codex worktree patching, GitHub PRs, code diff review, redeployment, rollback, automatic retries/circuit breaker, Kubernetes adapter. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
 
 ## Architecture
 

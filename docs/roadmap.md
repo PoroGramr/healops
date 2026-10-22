@@ -1,11 +1,11 @@
 # Roadmap
 
-- [x] Docker allowlist polling, health/exit detection, incident persistence and deduplication
+- [x] Docker allowlist event subscription plus periodic reconciliation, health/exit detection, incident persistence and deduplication
 - [x] React dashboard with API-backed containers, incidents, rule-based and optional OpenAI-compatible diagnosis
 - [x] LangGraph diagnostic subgraph stopping at human approval
 - [x] Approval-gated, default-off Docker restart and basic stability verification
 - [x] Backend/worker unit tests, frontend smoke test, local broken-app demo, CI
-- [ ] Docker Events stream, metrics, deployment history, HTTP verification and alerting
+- [ ] Metrics, deployment history, HTTP verification and alerting
 - [ ] Fine-grained Docker socket authorization and durable queue/leases
 - [ ] Codex CLI adapter with isolated worktree, patch review, sandboxed tests and PR generation
 - [ ] Deployment artifact tracking, administrator redeployment, rollback and circuit breaker
