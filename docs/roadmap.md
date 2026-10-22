@@ -8,7 +8,8 @@
 - [x] Backend/worker unit tests, frontend smoke test, local broken-app demo, CI
 - [ ] Metrics, deployment history, external alerting and broader HTTP endpoint assertions
 - [ ] Fine-grained Docker socket authorization and durable queue/leases
-- [ ] Codex CLI adapter with isolated worktree, patch review, sandboxed tests and PR generation
+- [x] Experimental opt-in Codex worktree/allowlist/networkless test/PR orchestration adapter (mocked tests)
+- [ ] Working Codex sandbox on an isolated job, grounded production patch, real PR and human/CI review
 - [ ] Deployment artifact tracking, administrator redeployment and rollback (restart circuit limit exists; deployment circuit does not)
 - [ ] Kubernetes plugin implementation
 

@@ -1,0 +1,115 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from app import patches
+
+
+def git(repo: Path, *args):
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    folder = tmp_path / "source"
+    folder.mkdir()
+    git(folder, "init", "-b", "main")
+    git(folder, "config", "user.name", "HealOps Test")
+    git(folder, "config", "user.email", "test@example.invalid")
+    (folder / "app.py").write_text("BUG = True\n")
+    git(folder, "add", "app.py")
+    git(folder, "commit", "-m", "baseline")
+    return folder
+
+
+def policy(repo, paths=frozenset({"app.py"})):
+    return patches.PatchPolicy(
+        repo, "example/project", paths, "sha256:" + "a" * 64, ("python", "-m", "pytest")
+    )
+
+
+def test_patch_in_worktree_and_networkless_test(repo, monkeypatch):
+    real = patches.command
+    calls = []
+
+    def fake(argv, cwd, timeout, input_text=None):
+        calls.append(argv)
+        if argv[:3] == ["codex", "login", "status"]:
+            return "Logged in using ChatGPT"
+        if argv[:2] == ["docker", "image"]:
+            return "sha256:" + "a" * 64
+        if argv[:2] == ["codex", "exec"]:
+            (cwd / "app.py").write_text("BUG = False\n")
+            return "patched"
+        if argv[:2] == ["docker", "run"]:
+            assert "none" in argv and "--read-only" in argv
+            return "1 passed"
+        return real(argv, cwd, timeout, input_text)
+
+    monkeypatch.setattr(patches, "command", fake)
+    result = patches.propose_patch(policy(repo), 7, "Bug", ["Traceback"])
+    assert result["validated"] and not result["published"]
+    assert result["files"] == ["app.py"] and "BUG = False" in result["diff"]
+    assert result["test_output"] == "1 passed"
+    assert (repo / "app.py").read_text() == "BUG = True\n"
+    assert (
+        not subprocess.run(
+            ["git", "worktree", "list", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ).stdout.count("worktree ")
+        > 1
+    )
+
+
+def test_reject_unregistered_change(repo, monkeypatch):
+    real = patches.command
+
+    def fake(argv, cwd, timeout, input_text=None):
+        if argv[:3] == ["codex", "login", "status"]:
+            return "Logged in"
+        if argv[:2] == ["docker", "image"]:
+            return "sha256:" + "a" * 64
+        if argv[:2] == ["codex", "exec"]:
+            (cwd / "unauthorized.py").write_text("bad\n")
+            return "patched"
+        return real(argv, cwd, timeout, input_text)
+
+    monkeypatch.setattr(patches, "command", fake)
+    with pytest.raises(RuntimeError, match="unregistered"):
+        patches.propose_patch(policy(repo), 8, "Bug", [])
+    assert not (repo / "unauthorized.py").exists()
+
+
+def test_policy_blocks_path_traversal(repo):
+    with pytest.raises(ValueError):
+        policy(repo, frozenset({"../.env"})).validate()
+
+
+def test_publish_branch_then_open_pr_in_isolated_git_fixture(repo, tmp_path, monkeypatch):
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    git(repo, "remote", "add", "origin", str(bare))
+    real = patches.command
+
+    def fake(argv, cwd, timeout, input_text=None):
+        if argv[:3] == ["codex", "login", "status"]:
+            return "Logged in"
+        if argv[:2] == ["docker", "image"]:
+            return "sha256:" + "a" * 64
+        if argv[:2] == ["codex", "exec"]:
+            (cwd / "app.py").write_text("BUG = False\n")
+            return "patched"
+        if argv[:2] == ["docker", "run"]:
+            return "1 passed"
+        if argv[:3] == ["gh", "pr", "create"]:
+            return "https://github.com/example/project/pull/1"
+        return real(argv, cwd, timeout, input_text)
+
+    monkeypatch.setattr(patches, "command", fake)
+    result = patches.propose_patch(policy(repo), 9, "Bug", [], publish=True)
+    assert result["pr_url"] == "https://github.com/example/project/pull/1"
+    ref = subprocess.run(
+        ["git", "--git-dir", str(bare), "show-ref", "--verify", "refs/heads/healops/incident-9"],
+        capture_output=True,
+    )
+    assert ref.returncode == 0
