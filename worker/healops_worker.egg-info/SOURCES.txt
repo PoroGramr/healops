@@ -1,9 +1,0 @@
-pyproject.toml
-healops_worker/main.py
-healops_worker/monitor.py
-healops_worker.egg-info/PKG-INFO
-healops_worker.egg-info/SOURCES.txt
-healops_worker.egg-info/dependency_links.txt
-healops_worker.egg-info/entry_points.txt
-healops_worker.egg-info/requires.txt
-healops_worker.egg-info/top_level.txt

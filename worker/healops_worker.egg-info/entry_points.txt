@@ -1,2 +1,0 @@
-[console_scripts]
-healops-worker = healops_worker.main:main
