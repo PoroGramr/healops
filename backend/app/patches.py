@@ -1,7 +1,8 @@
-"""Opt-in isolated worktree patch proposal; never edits or deploys live containers.
+"""Opt-in worktree patch proposal in an ephemeral restricted Docker container.
 
-Codex's workspace-write sandbox is not a host security boundary. Only run this
-adapter in a dedicated, credential-minimized job/VM, not the production API.
+Codex is un-sandboxed INSIDE that container, not on the host. The user must
+accept the risk of mounting their Codex auth file into an egress-capable job.
+Never mount the host Docker socket or application secrets into this job.
 """
 
 import json
@@ -12,8 +13,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-BRANCH = re.compile(r"^[a-zA-Z0-9_-]{1,40}$")
-
 
 @dataclass(frozen=True)
 class PatchPolicy:
@@ -22,6 +21,8 @@ class PatchPolicy:
     allowed_files: frozenset[str]
     test_image: str  # Pin to an already-installed image digest.
     test_command: tuple[str, ...]
+    codex_image: str  # Pinned local image, Codex runs as non-root in a container.
+    codex_auth: Path
     timeout: int = 180
 
     def validate(self):
@@ -30,6 +31,8 @@ class PatchPolicy:
             or not self.allowed_files
             or not self.test_command
             or not self.test_image.startswith("sha256:")
+            or not self.codex_image.startswith("sha256:")
+            or not self.codex_auth.is_file()
             or self.timeout > 600
             or self.timeout < 1
             or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.github_repo)
@@ -64,13 +67,8 @@ def propose_patch(
         raise ValueError("Invalid incident context")
     if command(["git", "status", "--porcelain"], policy.repository, 10):
         raise RuntimeError("Source repository must be clean")
-    if "Logged in" not in command(["codex", "login", "status"], policy.repository, 10):
-        raise RuntimeError("Codex CLI is not authenticated")
-    command(
-        ["docker", "image", "inspect", policy.test_image, "--format", "{{.Id}}"],
-        policy.repository,
-        10,
-    )
+    for image in (policy.test_image, policy.codex_image):
+        command(["docker", "image", "inspect", image, "--format", "{{.Id}}"], policy.repository, 10)
     branch = f"healops/incident-{incident_id}"
     with tempfile.TemporaryDirectory(prefix="healops-patch-") as temp:
         worktree = Path(temp) / "source"
@@ -91,14 +89,44 @@ def propose_patch(
             )
             command(
                 [
-                    "codex",
-                    "exec",
-                    "-C",
-                    str(worktree),
-                    "--sandbox",
-                    "workspace-write",
-                    "--ephemeral",
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-i",
+                    "--network",
+                    "bridge",
+                    "--read-only",
+                    "--cap-drop",
+                    "ALL",
+                    "--security-opt",
+                    "no-new-privileges",
+                    "--pids-limit",
+                    "128",
+                    "--memory",
+                    "2g",
+                    "--cpus",
+                    "2",
+                    "--user",
+                    "1000:1000",
+                    "--tmpfs",
+                    "/tmp:rw,nosuid,nodev,size=256m",
+                    "--tmpfs",
+                    "/home/node/.codex:rw,nosuid,nodev,size=64m,uid=1000,gid=1000",
+                    "-v",
+                    f"{policy.codex_auth}:/home/node/.codex/auth.json:ro",
+                    "-v",
+                    f"{worktree}:/workspace:rw",
+                    "-v",
+                    f"{policy.repository / '.git'}:{policy.repository / '.git'}:ro",
+                    "-w",
+                    "/workspace",
+                    policy.codex_image,
+                    "--dangerously-bypass-approvals-and-sandbox",
                     "--ignore-user-config",
+                    "--ephemeral",
+                    "--skip-git-repo-check",
+                    "-C",
+                    "/workspace",
                     "-",
                 ],
                 worktree,

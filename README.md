@@ -14,7 +14,7 @@ For an always-on PW3 monitor on a shared Docker host, use the separate socket-pr
 - Explicit administrator approval and an **additional default-off restart switch** before the worker can claim a structured Docker restart. Basic Docker health/stability verification.
 - Alembic schema, a local broken-app demo, automated Python/React tests and GitHub Actions CI.
 
-**Not operational:** metrics/deployment history, autonomous code repair, real GitHub PR creation, review/merge, redeployment, rollback, Kubernetes adapter. An [experimental worktree/PR adapter](docs/patch-proposals.md) exists but is disabled: Codex's sandbox cannot write on this host, and no real PR or deployment was executed. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
+**Not operational:** metrics/deployment history, autonomous code repair, real GitHub PR creation, review/merge, redeployment, rollback, Kubernetes adapter. An [experimental worktree/PR adapter](docs/patch-proposals.md) produced a real Codex patch and passed an isolated test on a disposable fixture, but is not wired to incidents; no real PR or deployment was executed. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
 
 ## Architecture
 
