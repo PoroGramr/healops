@@ -165,3 +165,14 @@ def test_container_recreated_same_name(client):
     )
     assert response.status_code == 200
     assert len(client.get("/api/containers", headers=ADMIN).json()) == 1
+
+
+def test_stale_worker_is_not_reported_healthy(client, monkeypatch):
+    from app import main
+
+    observe(client)
+    monkeypatch.setattr(main, "stale", lambda _: True)
+    summary = client.get("/api/dashboard", headers=ADMIN).json()
+    assert summary["monitor_online"] is False
+    assert summary["healthy"] == 0
+    assert client.get("/api/containers", headers=ADMIN).json()[0]["status"] == "stale"

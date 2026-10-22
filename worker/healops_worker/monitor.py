@@ -10,7 +10,7 @@ def classify(snapshot: dict) -> bool:
     )
 
 
-def normalize(container) -> dict:
+def normalize(container, include_logs: bool = True) -> dict:
     container.reload()
     attrs = container.attrs
     state = attrs.get("State") or {}
@@ -21,7 +21,9 @@ def normalize(container) -> dict:
         "status": state.get("Status", "unknown"),
         "health": (state.get("Health") or {}).get("Status", "none"),
         "exit_code": state.get("ExitCode"),
-        "logs": container.logs(tail=80).decode("utf-8", errors="replace")[-8192:],
+        "logs": container.logs(tail=80).decode("utf-8", errors="replace")[-8192:]
+        if include_logs
+        else "",
     }
 
 

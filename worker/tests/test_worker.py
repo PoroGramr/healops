@@ -1,9 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from queue import Queue
 
 import pytest
 
-from healops_worker.main import event_listener, execute_restart
+from healops_worker.main import event_listener, execute_restart, probe_http, run_once
 from healops_worker.monitor import classify, normalize
 
 
@@ -34,6 +35,63 @@ def test_event_filter_and_wakeup():
     wake.set.assert_called_once()
 
 
+def test_http_probe_requires_actuator_up():
+    for status, payload, expected in (
+        (200, {"status": "UP"}, True),
+        (200, {"status": "DOWN"}, False),
+        (503, {"status": "DOWN"}, False),
+    ):
+        with patch("healops_worker.main.httpx.Client") as client:
+            client.return_value.__enter__.return_value.get.return_value.status_code = (
+                status
+            )
+            client.return_value.__enter__.return_value.get.return_value.json.return_value = payload
+            assert probe_http("http://pw3-attendance:8080/actuator/health") is expected
+
+
+def test_http_probe_marks_registered_container_unhealthy():
+    container = Mock()
+    container.id = "abc"
+    container.name = "pw3-attendance"
+    container.attrs = {"State": {"Status": "running", "ExitCode": 0}}
+    container.logs.return_value = b""
+    docker_client = SimpleNamespace(containers=SimpleNamespace(get=lambda _: container))
+    api = Mock()
+    with patch("healops_worker.main.probe_http", return_value=False):
+        run_once(
+            docker_client,
+            api,
+            {"pw3-attendance"},
+            False,
+            {"pw3-attendance": "http://pw3-attendance:8080/actuator/health"},
+        )
+    assert api.post.call_args.kwargs["json"]["health"] == "unhealthy"
+
+
+def test_die_event_is_recorded_even_if_container_already_restarted():
+    container = Mock()
+    container.id = "abc"
+    container.name = "pw3-attendance"
+    container.attrs = {"State": {"Status": "running", "ExitCode": 0}}
+    container.logs.return_value = b""
+    docker_client = SimpleNamespace(containers=SimpleNamespace(get=lambda _: container))
+    events = Queue()
+    events.put(
+        {
+            "id": "abc",
+            "Action": "die",
+            "Actor": {"Attributes": {"name": "pw3-attendance", "exitCode": "137"}},
+        }
+    )
+    api = Mock()
+    run_once(
+        docker_client, api, {"pw3-attendance"}, False, capture_logs=False, events=events
+    )
+    assert api.post.call_args_list[0].kwargs["json"]["exit_code"] == 137
+    assert api.post.call_args_list[0].kwargs["json"]["status"] == "exited"
+    assert api.post.call_args_list[1].kwargs["json"]["status"] == "running"
+
+
 def test_normalize_health_event():
     container = Mock()
     container.id = "abc"
@@ -50,6 +108,8 @@ def test_normalize_health_event():
     result = normalize(container)
     assert result["health"] == "unhealthy"
     assert result["logs"] == "RuntimeError: demo failure"
+    assert normalize(container, include_logs=False)["logs"] == ""
+    assert container.logs.call_count == 1
 
 
 def test_reject_unregistered_and_commands():

@@ -4,6 +4,8 @@
 
 > **Experimental.** Do not connect the worker to a Docker daemon hosting production containers. The Docker socket has host-level authority; the allowlist is application-level, not a security boundary. This demo is bound to localhost and starts in read-only mode.
 
+For an always-on **read-only PW3 monitor** on a shared Docker host, use the separate socket-proxy profile in [continuous monitor setup](docs/continuous-monitor.md). It checks both Docker status and Spring Actuator health, but does not automatically restart or patch code.
+
 ## What works today
 
 - Docker Events wakeup plus five-second reconciliation of an explicit container allowlist: status, exit codes, health checks and recent logs. Active incident deduplication and SQLite audit events.

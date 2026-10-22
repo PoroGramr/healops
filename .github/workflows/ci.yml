@@ -36,3 +36,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env && docker compose -f deploy/docker-compose.yml config --quiet
+      - run: cp .env.example .env.monitor && docker compose -f deploy/compose.monitor.yml config --quiet

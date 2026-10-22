@@ -1,0 +1,59 @@
+# Continuous read-only monitor. The worker never sees the raw Docker socket.
+# Use an ignored ../.env.monitor and an explicit container allowlist.
+name: healops-monitor
+services:
+  api:
+    build: ../backend
+    restart: unless-stopped
+    env_file: ../.env.monitor
+    environment:
+      HEALOPS_DB_URL: sqlite:////srv/data/healops.db
+      HEALOPS_AUTO_RESTART: "false"
+    volumes:
+      - monitor-data:/srv/data
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+  dashboard:
+    build: ../frontend
+    restart: unless-stopped
+    ports: ["127.0.0.1:8088:80"]
+    depends_on: [api]
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+  socket-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [socket]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/run, /tmp]
+  worker:
+    build: ../worker
+    restart: unless-stopped
+    env_file: ../.env.monitor
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+      HEALOPS_API_URL: http://api:8000
+      HEALOPS_AUTO_RESTART: "false"
+      HEALOPS_CAPTURE_LOGS: "false"
+    depends_on: [api, socket-proxy]
+    networks: [control, socket, web]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+networks:
+  control: {}
+  socket:
+    internal: true
+  web:
+    external: true
+volumes:
+  monitor-data: {}

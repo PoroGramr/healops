@@ -1,5 +1,6 @@
 import hmac
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +18,7 @@ from app.models import (
     RemediationExecution,
     RemediationPlan,
     VerificationResult,
+    utcnow,
 )
 from app.settings import settings
 
@@ -68,6 +70,13 @@ app = FastAPI(title="HealOps API", lifespan=lifespan)
 
 def event(db: Session, incident: Incident, kind: str, detail: str = ""):
     db.add(IncidentEvent(incident_id=incident.id, kind=kind, detail=detail))
+
+
+def stale(container: Container) -> bool:
+    # SQLite returns naive UTC timestamps; normalize both sides before comparing.
+    return utcnow().replace(tzinfo=None) - container.last_seen.replace(tzinfo=None) > timedelta(
+        seconds=20
+    )
 
 
 def serialize_incident(db: Session, incident: Incident):
@@ -216,8 +225,13 @@ def dashboard(db: Session = Depends(get_session)):
     containers = db.scalars(select(Container)).all()
     return {
         "total": len(containers),
-        "healthy": sum(c.status == "running" and c.health != "unhealthy" for c in containers),
-        "unhealthy": sum(c.status != "running" or c.health == "unhealthy" for c in containers),
+        "healthy": sum(
+            not stale(c) and c.status == "running" and c.health != "unhealthy" for c in containers
+        ),
+        "unhealthy": sum(
+            stale(c) or c.status != "running" or c.health == "unhealthy" for c in containers
+        ),
+        "monitor_online": any(not stale(c) for c in containers),
         "open_incidents": db.scalar(
             select(func.count()).select_from(Incident).where(Incident.status.in_(OPEN))
         ),
@@ -237,7 +251,7 @@ def containers(db: Session = Depends(get_session)):
             "id": c.id,
             "name": c.name,
             "image": c.image,
-            "status": c.status,
+            "status": "stale" if stale(c) else c.status,
             "health": c.health,
             "logs": c.logs,
             "last_seen": c.last_seen,
