@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "healops-worker"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["docker>=7,<8", "httpx>=0.27,<1"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "ruff>=0.8,<1"]
+
+[project.scripts]
+healops-worker = "healops_worker.main:main"
+
+[tool.setuptools.packages.find]
+include = ["healops_worker*"]

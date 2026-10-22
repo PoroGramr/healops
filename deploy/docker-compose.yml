@@ -1,0 +1,45 @@
+services:
+  api:
+    build: ../backend
+    env_file: ../.env
+    environment:
+      HEALOPS_DB_URL: sqlite:////srv/data/healops.db
+    volumes:
+      - healops-data:/srv/data
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+  dashboard:
+    build: ../frontend
+    ports: ["127.0.0.1:8088:80"]
+    depends_on: [api]
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+  worker:
+    build: ../worker
+    env_file: ../.env
+    environment:
+      HEALOPS_API_URL: http://api:8000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on: [api]
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+  broken-app:
+    build: ../examples/broken-app
+    container_name: healops-broken-app
+    ports: ["127.0.0.1:8099:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+    networks: [control]
+    security_opt: ["no-new-privileges:true"]
+networks:
+  control: {}
+volumes:
+  healops-data: {}
