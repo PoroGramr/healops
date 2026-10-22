@@ -2,7 +2,7 @@
 
 **AI-powered self-healing infrastructure — Docker MVP.** Detect failed containers, explain likely causes, and offer an administrator-controlled restart. Kubernetes support is on the roadmap, not shipped. [한국어 README](README.ko.md)
 
-> **Experimental.** Do not connect the worker to a Docker daemon hosting production containers. The Docker socket has host-level authority; the allowlist is application-level, not a security boundary. This demo is bound to localhost and starts in read-only mode.
+> **Experimental.** The disposable demo worker's raw Docker socket is unsafe on a production daemon. The separate production monitor uses a read-only proxy and a narrowly configured executor, but the executor's socket still has host-level authority. The dashboard binds to localhost.
 
 For an always-on PW3 monitor on a shared Docker host, use the separate socket-proxy profile in [continuous monitor setup](docs/continuous-monitor.md). Its optional repair overlay enables bounded restart of exactly one approved Compose service via a separate executor; it does not patch or deploy code.
 
@@ -14,9 +14,9 @@ For an always-on PW3 monitor on a shared Docker host, use the separate socket-pr
 - Explicit administrator approval and an **additional default-off restart switch** before the worker can claim a structured Docker restart. Basic Docker health/stability verification.
 - Alembic schema, a local broken-app demo, automated Python/React tests and GitHub Actions CI.
 
-**Not operational:** metrics/deployment history, autonomous code repair, real GitHub PR creation, review/merge, redeployment, rollback, Kubernetes adapter. An [experimental worktree/PR adapter](docs/patch-proposals.md) produced a real Codex patch and passed an isolated test on a disposable fixture, but is not wired to incidents; no real PR or deployment was executed. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately.
+**Not operational in HealOps:** unattended incident-to-code repair, real repair PR creation/merge, production artifact promotion, database rollback, Kubernetes adapter. The [Codex adapter](docs/patch-proposals.md) fixed a deliberately failing Java test in a separate PW3 clone, passed isolated tests and deployed its candidate to staging; it is not connected to production incidents. PW3's separate Actions deployment now includes image/env/Compose rollback on failed health checks, tested offline; its failure path was not induced on production. [Roadmap](docs/roadmap.md).
 
-An [isolated PW3 staging and image rollback workflow](docs/pw3-staging.md) is available for candidate validation; it does not promote to production. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
+An [isolated PW3 staging and image rollback workflow](docs/pw3-staging.md) is available for candidate validation; it does not promote to production. HealOps' reserved deployment schema is not a working deployment controller.
 
 ## Architecture
 

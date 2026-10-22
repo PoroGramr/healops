@@ -6,9 +6,10 @@ Never mount the host Docker socket or application secrets into this job.
 """
 
 import json
-
+import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ class PatchPolicy:
     codex_image: str  # Pinned local image, Codex runs as non-root in a container.
     codex_auth: Path
     timeout: int = 180
+    stage_pw3: bool = False
 
     def validate(self):
         if (
@@ -42,6 +44,10 @@ class PatchPolicy:
             p = Path(path)
             if p.is_absolute() or ".." in p.parts or not path or path.startswith("."):
                 raise ValueError("Patch paths must be exact relative source files")
+            if self.stage_pw3 and not path.startswith(("src/main/java/", "src/test/java/")):
+                raise ValueError(
+                    "PW3 automated candidates cannot change migrations or deployment files"
+                )
 
 
 def command(argv: list[str], cwd: Path, timeout: int, input_text: str | None = None):
@@ -153,6 +159,10 @@ def propose_patch(
                     raise RuntimeError("Patch file escapes worktree")
             command(["git", "add", "-N", "--", *sorted(changed)], worktree, 10)
             command(["git", "diff", "--check", "HEAD"], worktree, 10)
+            artifact = Path(temp) / "artifact"
+            if policy.stage_pw3:
+                artifact.mkdir(mode=0o770)
+                artifact.chmod(0o770)
             # No network, no socket, no credentials, read-only source; approved fixed argv only.
             test_output = command(
                 [
@@ -167,15 +177,31 @@ def propose_patch(
                     "--security-opt",
                     "no-new-privileges",
                     "--pids-limit",
-                    "128",
+                    "256" if policy.stage_pw3 else "128",
                     "--memory",
-                    "1g",
+                    "5g" if policy.stage_pw3 else "1g",
                     "--cpus",
-                    "1",
+                    "2" if policy.stage_pw3 else "1",
                     "--user",
                     "65532:65532",
+                    *(
+                        [
+                            "--group-add",
+                            str(os.getgid()),
+                            "--shm-size",
+                            "1g",
+                            "-v",
+                            f"{artifact}:/out:rw",
+                        ]
+                        if policy.stage_pw3
+                        else []
+                    ),
                     "--tmpfs",
-                    "/tmp:rw,nosuid,nodev,size=256m",
+                    (
+                        "/tmp:rw,nosuid,nodev,size=3g,uid=65532,gid=65532"
+                        if policy.stage_pw3
+                        else "/tmp:rw,nosuid,nodev,size=256m"
+                    ),
                     "-v",
                     f"{worktree}:/src:ro",
                     "-w",
@@ -186,6 +212,39 @@ def propose_patch(
                 worktree,
                 policy.timeout,
             )
+            stage_result = None
+            if policy.stage_pw3:
+                if not (artifact / "app.jar").is_file():
+                    raise RuntimeError("Sandbox tests did not export a candidate JAR")
+                tag = f"healops-pw3-stage-candidate:incident-{incident_id}"
+                command(
+                    [
+                        "docker",
+                        "build",
+                        "-f",
+                        str(policy.repository / "Dockerfile"),
+                        "-t",
+                        tag,
+                        str(artifact),
+                    ],
+                    worktree,
+                    policy.timeout,
+                )
+                candidate = command(
+                    ["docker", "image", "inspect", tag, "--format", "{{.Id}}"], worktree, 10
+                )
+                stage_result = json.loads(
+                    command(
+                        [
+                            sys.executable,
+                            str(Path(__file__).resolve().parents[2] / "scripts/staging_rollout.py"),
+                            "--image",
+                            candidate,
+                        ],
+                        worktree,
+                        policy.timeout,
+                    )
+                )
             diff = command(["git", "diff", "HEAD", "--", *sorted(changed)], worktree, 10)
             if not publish:
                 return {
@@ -193,6 +252,7 @@ def propose_patch(
                     "files": sorted(changed),
                     "diff": diff[:20000],
                     "test_output": test_output[-4000:],
+                    "staging": stage_result,
                     "published": False,
                 }
             command(["git", "add", "--", *sorted(changed)], worktree, 10)
@@ -230,6 +290,7 @@ def propose_patch(
                 "files": sorted(changed),
                 "diff": diff[:20000],
                 "test_output": test_output[-4000:],
+                "staging": stage_result,
                 "published": True,
                 "pr_url": url,
             }

@@ -1,4 +1,6 @@
 import subprocess
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -92,3 +94,45 @@ def test_publish_branch_then_open_pr_in_isolated_git_fixture(repo, tmp_path, mon
         capture_output=True,
     )
     assert ref.returncode == 0
+
+
+def test_pw3_candidate_builds_tests_and_stages_before_pr(repo, monkeypatch):
+    source = repo / "src/main/java/Fix.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("class Fix { boolean broken = true; }\n")
+    git(repo, "add", "src")
+    git(repo, "commit", "-m", "add fixture")
+    registered = "src/main/java/Fix.java"
+    config = replace(policy(repo, frozenset({registered})), stage_pw3=True)
+    real = patches.command
+
+    def fake(argv, cwd, timeout, input_text=None):
+        if argv[:2] == ["docker", "image"]:
+            return "sha256:" + "a" * 64
+        if argv[:2] == ["docker", "run"]:
+            if "--dangerously-bypass-approvals-and-sandbox" in argv:
+                (cwd / registered).write_text("class Fix { boolean broken = false; }\n")
+                return "patched"
+            assert "none" in argv and "5g" in argv and "--shm-size" in argv
+            mount = next(x for x in argv if x.endswith(":/out:rw"))
+            (Path(mount.removesuffix(":/out:rw")) / "app.jar").write_bytes(b"jar fixture")
+            return "BUILD SUCCESSFUL"
+        if argv[:2] == ["docker", "build"]:
+            return "built"
+        if len(argv) > 1 and str(argv[1]).endswith("staging_rollout.py"):
+            return json.dumps({"status": "deployed", "image": "sha256:" + "a" * 64})
+        return real(argv, cwd, timeout, input_text)
+
+    monkeypatch.setattr(patches, "command", fake)
+    result = patches.propose_patch(config, 42, "broken boolean", [], publish=False)
+    assert result["staging"]["status"] == "deployed"
+    assert result["published"] is False
+    assert "broken = true" in source.read_text()
+
+
+def test_pw3_policy_rejects_db_migration(repo):
+    config = replace(
+        policy(repo, frozenset({"src/main/resources/db/migration/V7__x.sql"})), stage_pw3=True
+    )
+    with pytest.raises(ValueError, match="migrations"):
+        config.validate()
