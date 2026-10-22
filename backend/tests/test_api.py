@@ -215,3 +215,31 @@ def test_auto_restart_stops_at_hourly_circuit_limit(client):
     assert second["status"] == "failed"
     assert second["plan"]["status"] == "blocked"
     assert client.post("/api/worker/claim", headers=WORKER).json()["plan"] is None
+
+
+def test_stranded_execution_fails_closed_without_restarting(client):
+    from datetime import timedelta
+    from app.models import Incident, utcnow
+
+    settings.healops_auto_restart = True
+    settings.healops_auto_approve_names = "healops-broken-app"
+    for _ in range(3):
+        observe(client, health="unhealthy")
+    plan = client.post("/api/worker/claim", headers=WORKER).json()["plan"]
+    with next(app.dependency_overrides[get_session]()) as db:
+        incident = db.get(Incident, 1)
+        incident.updated_at = utcnow() - timedelta(minutes=3)
+        db.commit()
+    assert client.post("/api/worker/claim", headers=WORKER).json()["plan"] is None
+    result = client.get("/api/incidents", headers=ADMIN).json()[0]
+    assert result["status"] == "failed"
+    assert result["plan"]["status"] == "failed"
+    assert "execution_timeout" in [e["kind"] for e in result["events"]]
+    assert (
+        client.post(
+            f"/api/worker/plans/{plan['id']}/result",
+            headers=WORKER,
+            json={"outcome": "success", "healthy": True},
+        ).status_code
+        == 409
+    )

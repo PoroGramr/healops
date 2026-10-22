@@ -349,6 +349,21 @@ def decide(plan_id: int, approved: bool, db: Session = Depends(get_session)):
 def claim(db: Session = Depends(get_session)):
     if not settings.healops_auto_restart:
         return {"plan": None}
+    expired = db.scalars(
+        select(RemediationPlan)
+        .join(Incident, RemediationPlan.incident_id == Incident.id)
+        .where(
+            RemediationPlan.status == "running",
+            Incident.updated_at < utcnow() - timedelta(minutes=2),
+        )
+    ).all()
+    for old in expired:
+        old.status = "failed"
+        stale_incident = db.get(Incident, old.incident_id)
+        stale_incident.status = "failed"
+        event(db, stale_incident, "execution_timeout", "Worker lost result; no automatic retry")
+    if expired:
+        db.commit()
     plan = db.scalar(
         select(RemediationPlan)
         .where(RemediationPlan.status == "approved", RemediationPlan.kind == "restart")
