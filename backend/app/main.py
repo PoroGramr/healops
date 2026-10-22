@@ -200,6 +200,22 @@ def observe(data: Observation, db: Session = Depends(get_session)):
     latest = db.scalar(
         select(Incident).where(Incident.container_id == data.id).order_by(Incident.id.desc())
     )
+    if not fault:
+        superseded = db.scalars(
+            select(Incident).where(
+                Incident.container_name == data.name,
+                Incident.container_id != data.id,
+                Incident.status.in_({"detected", "proposed", "awaiting_approval"}),
+            )
+        ).all()
+        for old in superseded:
+            old.status = IncidentStatus.RESOLVED.value
+            event(db, old, "superseded", "Replacement container is healthy")
+            for plan in db.scalars(
+                select(RemediationPlan).where(RemediationPlan.incident_id == old.id)
+            ):
+                if plan.status in {"proposed", "approved"}:
+                    plan.status = "cancelled"
     if fault and active is None and previous_fault and latest and latest.status == "failed":
         db.commit()
         return {"incident_id": latest.id, "created": False}
@@ -325,7 +341,9 @@ def public_settings():
             settings.llm_base_url and settings.llm_model and settings.llm_api_key
         ),
         "github_connected": False,
-        "mode": "read-only until per-plan approval",
+        "mode": "bounded policy restart"
+        if settings.healops_auto_restart and settings.auto_approve_names
+        else "manual approval or read-only",
     }
 
 

@@ -243,3 +243,26 @@ def test_stranded_execution_fails_closed_without_restarting(client):
         ).status_code
         == 409
     )
+
+
+def test_healthy_replacement_closes_old_container_incident(client):
+    assert observe(client, status="exited", exit_code=137).json()["created"]
+    replacement = client.post(
+        "/api/worker/observe",
+        headers=WORKER,
+        json={
+            "id": "container-2",
+            "name": "healops-broken-app",
+            "image": "demo:v2",
+            "status": "running",
+            "health": "healthy",
+            "exit_code": 0,
+            "logs": "",
+        },
+    )
+    assert replacement.status_code == 200
+    old = client.get("/api/incidents", headers=ADMIN).json()[0]
+    assert old["status"] == "resolved"
+    assert old["plan"]["status"] == "cancelled"
+    assert "superseded" in [entry["kind"] for entry in old["events"]]
+    assert client.get("/api/dashboard", headers=ADMIN).json()["open_incidents"] == 0

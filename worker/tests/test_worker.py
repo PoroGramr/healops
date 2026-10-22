@@ -4,7 +4,13 @@ from queue import Queue
 
 import pytest
 
-from healops_worker.main import event_listener, execute_restart, probe_http, run_once
+from healops_worker.main import (
+    event_listener,
+    execute_restart,
+    maintenance_active,
+    probe_http,
+    run_once,
+)
 from healops_worker.monitor import classify, normalize
 
 
@@ -42,10 +48,9 @@ def test_http_probe_requires_actuator_up():
         (503, {"status": "DOWN"}, False),
     ):
         with patch("healops_worker.main.httpx.Client") as client:
-            client.return_value.__enter__.return_value.get.return_value.status_code = (
-                status
-            )
-            client.return_value.__enter__.return_value.get.return_value.json.return_value = payload
+            caller = client.return_value.__enter__.return_value
+            caller.get.return_value.status_code = status
+            caller.get.return_value.json.return_value = payload
             assert probe_http("http://pw3-attendance:8080/actuator/health") is expected
 
 
@@ -90,6 +95,32 @@ def test_die_event_is_recorded_even_if_container_already_restarted():
     assert api.post.call_args_list[0].kwargs["json"]["exit_code"] == 137
     assert api.post.call_args_list[0].kwargs["json"]["status"] == "exited"
     assert api.post.call_args_list[1].kwargs["json"]["status"] == "running"
+
+
+def test_maintenance_discards_events_and_does_not_claim(tmp_path):
+    marker = tmp_path / "pw3-attendance"
+    marker.touch()
+    assert maintenance_active(str(marker))
+    events = Queue()
+    events.put({"Action": "die", "Actor": {"Attributes": {"name": "pw3-attendance"}}})
+    api = Mock()
+    docker_client = Mock()
+    run_once(
+        docker_client, api, {"pw3-attendance"}, True, events=events, maintenance=True
+    )
+    assert events.empty()
+    api.post.assert_not_called()
+    docker_client.containers.get.assert_not_called()
+
+
+def test_stale_maintenance_marker_expires(tmp_path):
+    import os
+    import time
+
+    marker = tmp_path / "pw3-attendance"
+    marker.touch()
+    os.utime(marker, (time.time() - 700, time.time() - 700))
+    assert not maintenance_active(str(marker))
 
 
 def test_normalize_health_event():

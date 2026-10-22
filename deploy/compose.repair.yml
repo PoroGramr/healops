@@ -9,8 +9,10 @@ services:
     environment:
       HEALOPS_AUTO_RESTART: "true"
       HEALOPS_EXECUTOR_URL: http://executor:8081
+      HEALOPS_MAINTENANCE_FILE: /run/healops/pw3-attendance
     depends_on: [api, socket-proxy, executor]
     networks: [control, socket, web, action]
+    volumes: ["../maintenance:/run/healops:ro"]
   executor:
     build: ../executor
     restart: unless-stopped

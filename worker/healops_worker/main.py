@@ -2,6 +2,7 @@ import os
 import queue
 import threading
 import time
+from pathlib import Path
 
 import docker
 import httpx
@@ -114,7 +115,17 @@ def run_once(
     events=None,
     executor_url: str = "",
     executor_token: str = "",
+    maintenance: bool = False,
 ):
+    if maintenance:
+        # Planned deployment: discard stale events and never claim a repair.
+        if events is not None:
+            while True:
+                try:
+                    events.get_nowait()
+                except queue.Empty:
+                    break
+        return
     if events is not None:
         while True:
             try:
@@ -195,6 +206,16 @@ def run_once(
             ).raise_for_status()
 
 
+def maintenance_active(path: str) -> bool:
+    if not path:
+        return False
+    try:
+        age = time.time() - Path(path).stat().st_mtime
+        return -30 <= age < 600
+    except OSError:
+        return False
+
+
 def main():
     names = {
         n.strip()
@@ -215,6 +236,7 @@ def main():
     capture_logs = os.getenv("HEALOPS_CAPTURE_LOGS", "true").lower() == "true"
     executor_url = os.getenv("HEALOPS_EXECUTOR_URL", "")
     executor_token = os.getenv("HEALOPS_EXECUTOR_TOKEN", "")
+    maintenance_file = os.getenv("HEALOPS_MAINTENANCE_FILE", "")
     if auto_restart and executor_url and len(executor_token) < 32:
         raise ValueError("Automatic restart requires the executor token")
     client = docker.from_env()
@@ -228,8 +250,17 @@ def main():
         headers={"Authorization": f"Bearer {token}"},
         timeout=12,
     ) as api:
+        was_maintenance = False
         while True:
             try:
+                paused = maintenance_active(maintenance_file)
+                if was_maintenance and not paused:
+                    while True:
+                        try:
+                            events.get_nowait()
+                        except queue.Empty:
+                            break
+                was_maintenance = paused
                 run_once(
                     client,
                     api,
@@ -240,6 +271,7 @@ def main():
                     events,
                     executor_url,
                     executor_token,
+                    maintenance=paused,
                 )
             except (httpx.HTTPError, docker.errors.DockerException) as exc:
                 print(f"poll failed: {type(exc).__name__}", flush=True)
