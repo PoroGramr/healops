@@ -14,7 +14,9 @@ For an always-on PW3 monitor on a shared Docker host, use the separate socket-pr
 - Explicit administrator approval and an **additional default-off restart switch** before the worker can claim a structured Docker restart. Basic Docker health/stability verification.
 - Alembic schema, a local broken-app demo, automated Python/React tests and GitHub Actions CI.
 
-**Not operational:** metrics/deployment history, autonomous code repair, real GitHub PR creation, review/merge, redeployment, rollback, Kubernetes adapter. An [experimental worktree/PR adapter](docs/patch-proposals.md) produced a real Codex patch and passed an isolated test on a disposable fixture, but is not wired to incidents; no real PR or deployment was executed. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
+**Not operational:** metrics/deployment history, autonomous code repair, real GitHub PR creation, review/merge, redeployment, rollback, Kubernetes adapter. An [experimental worktree/PR adapter](docs/patch-proposals.md) produced a real Codex patch and passed an isolated test on a disposable fixture, but is not wired to incidents; no real PR or deployment was executed. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately.
+
+An [isolated PW3 staging and image rollback workflow](docs/pw3-staging.md) is available for candidate validation; it does not promote to production. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
 
 ## Architecture
 

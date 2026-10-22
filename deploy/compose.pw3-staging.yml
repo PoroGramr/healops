@@ -1,0 +1,68 @@
+# Isolated PW3 staging: no production database, object store, networks or public ports.
+name: healops-pw3-stage
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${STAGING_MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: pw3_staging
+      MYSQL_USER: pw3_stage
+      MYSQL_PASSWORD: ${STAGING_MYSQL_PASSWORD:?}
+    volumes: ["stage-db:/var/lib/mysql"]
+    networks: [stage]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      retries: 20
+      start_period: 20s
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${STAGING_MINIO_USER:?}
+      MINIO_ROOT_PASSWORD: ${STAGING_MINIO_PASSWORD:?}
+    volumes: ["stage-objects:/data"]
+    networks: [stage]
+  app:
+    build:
+      context: ${PW3_STAGING_SOURCE_DIR:?}
+      dockerfile: Dockerfile
+    depends_on:
+      db: {condition: service_healthy}
+      minio: {condition: service_started}
+    ports: ["127.0.0.1:18080:8080"]
+    networks: [stage, ingress]
+    environment:
+      TZ: Asia/Seoul
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/pw3_staging?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: pw3_stage
+      SPRING_DATASOURCE_PASSWORD: ${STAGING_MYSQL_PASSWORD:?}
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${STAGING_MINIO_USER:?}
+      MINIO_SECRET_KEY: ${STAGING_MINIO_PASSWORD:?}
+      MINIO_BUCKET: pw3-stage
+      JWT_SECRET: ${STAGING_JWT_SECRET:?}
+      QR_URL_BASE: http://127.0.0.1:18080
+      MAIL_HOST: 127.0.0.1
+      MAIL_PORT: "2525"
+      MAIL_USERNAME: staging
+      MAIL_PASSWORD: staging
+      MAIL_SMTP_AUTH: "false"
+      MAIL_SMTP_STARTTLS_ENABLE: "false"
+      MAIL_FROM: staging@invalid.local
+      SIGNUP_NOTIFICATION_EMAIL: staging@invalid.local
+      GEMINI_API_KEY: staging-no-external-calls
+      COOLSMS_API_KEY: staging-no-external-calls
+      COOLSMS_SECRET_KEY: staging-no-external-calls
+      COOLSMS_SENDER_NUMBER: "0000000000"
+      IMGBB_API_KEY: staging-no-external-calls
+      DISCORD_WEBHOOK_URL: ""
+networks:
+  stage: {internal: true}
+  ingress: {}
+volumes:
+  stage-db: {}
+  stage-objects: {}

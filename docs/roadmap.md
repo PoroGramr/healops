@@ -9,6 +9,7 @@
 - [ ] Metrics, deployment history, external alerting and broader HTTP endpoint assertions
 - [ ] Fine-grained Docker socket authorization and durable queue/leases
 - [x] Experimental opt-in Codex containerized worktree/allowlist/networkless test/PR adapter (real fixture patch; mocked PR)
+- [x] Isolated PW3 MySQL/MinIO staging, networkless Gradle/Playwright candidate build, health-gated staging deployment and tested image rollback
 - [ ] Grounded production patch with sanitized evidence, real PR and CI review
 - [ ] Deployment artifact tracking, administrator redeployment and rollback (restart circuit limit exists; deployment circuit does not)
 - [ ] Kubernetes plugin implementation

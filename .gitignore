@@ -16,3 +16,4 @@
 *.sqlite*
 data/
 *.log
+.staging-deploy.lock
