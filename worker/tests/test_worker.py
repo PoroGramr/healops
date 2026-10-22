@@ -144,3 +144,27 @@ def test_recovery_stability_window():
         )
     assert result["healthy"]
     container.restart.assert_called_once_with(timeout=10)
+
+
+def test_executor_restart_requires_http_health_after_restart():
+    container = Mock()
+    container.id = "a" * 64
+    container.name = "pw3-attendance"
+    container.attrs = {"State": {"Status": "running"}}
+    client = SimpleNamespace(containers=SimpleNamespace(get=lambda _: container))
+    with (
+        patch("healops_worker.main.httpx.Client") as caller,
+        patch("healops_worker.main.probe_http", side_effect=[True, True]),
+        patch("healops_worker.main.time.sleep"),
+    ):
+        result = execute_restart(
+            client,
+            {"id": 1, "kind": "restart", "container_id": container.id},
+            {"pw3-attendance"},
+            "http://executor:8081",
+            "x" * 40,
+            "http://pw3-attendance:8080/actuator/health",
+        )
+    assert result["healthy"] is True
+    caller.return_value.__enter__.return_value.post.assert_called_once()
+    container.restart.assert_not_called()

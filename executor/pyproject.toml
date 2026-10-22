@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "healops-executor"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["docker>=7,<8"]
+[project.scripts]
+healops-executor = "healops_executor.main:main"
+[tool.setuptools.packages.find]
+include = ["healops_executor*"]

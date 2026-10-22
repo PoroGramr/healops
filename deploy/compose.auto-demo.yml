@@ -1,0 +1,74 @@
+name: healops-repair-demo
+services:
+  api:
+    build: ../backend
+    env_file: ../.env.auto-demo
+    environment:
+      HEALOPS_DB_URL: sqlite:////srv/data/healops.db
+      HEALOPS_AUTO_RESTART: "true"
+      HEALOPS_AUTO_APPROVE_NAMES: healops-repair-demo-app
+    volumes: ["demo-data:/srv/data"]
+    networks: [control]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+  dashboard:
+    build: ../frontend
+    ports: ["127.0.0.1:18088:80"]
+    depends_on: [api]
+    networks: [control]
+  socket-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
+    environment: {CONTAINERS: "1", EVENTS: "1", POST: "0"}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [socket]
+    read_only: true
+    tmpfs: [/run, /tmp]
+    security_opt: ["no-new-privileges:true"]
+  executor:
+    build: ../executor
+    env_file: ../.env.auto-demo
+    environment:
+      HEALOPS_EXECUTOR_CONTAINER: healops-repair-demo-app
+      HEALOPS_EXECUTOR_PROJECT: healops-repair-demo
+      HEALOPS_EXECUTOR_SERVICE: broken-app
+      HEALOPS_EXECUTOR_IMAGE: healops-repair-demo-broken-app
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    networks: [action]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+  worker:
+    build: ../worker
+    env_file: ../.env.auto-demo
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+      HEALOPS_API_URL: http://api:8000
+      HEALOPS_AUTO_RESTART: "true"
+      HEALOPS_MANAGED_CONTAINERS: healops-repair-demo-app
+      HEALOPS_HTTP_HEALTH_CONTAINER: healops-repair-demo-app
+      HEALOPS_HTTP_HEALTH_URL: http://broken-app:8000/actuator/health
+      HEALOPS_EXECUTOR_URL: http://executor:8081
+      HEALOPS_CAPTURE_LOGS: "false"
+    depends_on: [api, socket-proxy, executor, broken-app]
+    networks: [control, socket, action]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+  broken-app:
+    build: ../examples/broken-app
+    container_name: healops-repair-demo-app
+    ports: ["127.0.0.1:18099:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+    networks: [control]
+networks:
+  control: {}
+  socket: {internal: true}
+  action: {internal: true}
+volumes:
+  demo-data: {}

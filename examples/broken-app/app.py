@@ -22,6 +22,11 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(
                 503 if broken else 200, "unhealthy\n" if broken else "healthy\n"
             )
+        elif self.path == "/actuator/health":
+            self.respond(
+                503 if broken else 200,
+                '{"status":"DOWN"}' if broken else '{"status":"UP"}',
+            )
         else:
             self.respond(
                 200, "HealOps broken-app demo. GET /break to fail, /reset to recover.\n"

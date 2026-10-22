@@ -1,0 +1,30 @@
+# Apply on top of compose.monitor.yml only after verifying the isolated auto-demo.
+# Exact PW3 identity is checked again inside the socket-owning executor.
+services:
+  api:
+    environment:
+      HEALOPS_AUTO_RESTART: "true"
+      HEALOPS_AUTO_APPROVE_NAMES: pw3-attendance
+  worker:
+    environment:
+      HEALOPS_AUTO_RESTART: "true"
+      HEALOPS_EXECUTOR_URL: http://executor:8081
+    depends_on: [api, socket-proxy, executor]
+    networks: [control, socket, web, action]
+  executor:
+    build: ../executor
+    restart: unless-stopped
+    env_file: ../.env.monitor
+    environment:
+      HEALOPS_EXECUTOR_CONTAINER: pw3-attendance
+      HEALOPS_EXECUTOR_PROJECT: pw3-production
+      HEALOPS_EXECUTOR_SERVICE: app
+      HEALOPS_EXECUTOR_IMAGE: pw3-production-app
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    networks: [action]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+networks:
+  action: {internal: true}

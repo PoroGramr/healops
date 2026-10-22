@@ -31,6 +31,7 @@ class Container(Base):
     health: Mapped[str] = mapped_column(String(32), default="none")
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     logs: Mapped[str] = mapped_column(Text, default="")
+    failure_streak: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Incident(Base):

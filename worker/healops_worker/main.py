@@ -31,25 +31,51 @@ def event_listener(client, names: set[str], wake: threading.Event, events=None):
             time.sleep(3)
 
 
-def execute_restart(client, plan: dict, names: set[str]) -> dict:
+def execute_restart(
+    client,
+    plan: dict,
+    names: set[str],
+    executor_url: str = "",
+    executor_token: str = "",
+    health_url: str = "",
+) -> dict:
     if plan.get("kind") != "restart" or set(plan) != {"id", "kind", "container_id"}:
         raise ValueError("Unsupported remediation")
     container = client.containers.get(plan["container_id"])
     if container.name not in names or container.id != plan["container_id"]:
         raise ValueError("Container not registered")
-    container.restart(timeout=10)
+    if executor_url:
+        if len(executor_token) < 32:
+            raise ValueError("Executor credential missing")
+        with httpx.Client(timeout=18) as caller:
+            reply = caller.post(
+                executor_url.rstrip("/") + "/restart",
+                headers={"Authorization": "Bearer " + executor_token},
+                json={"container_id": container.id},
+            )
+            reply.raise_for_status()
+    else:
+        container.restart(timeout=10)  # Disposable demo only.
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         container.reload()
         state = container.attrs.get("State", {})
         health = (state.get("Health") or {}).get("Status", "none")
-        if state.get("Status") == "running" and health in {"healthy", "none"}:
+        if (
+            state.get("Status") == "running"
+            and health in {"healthy", "none"}
+            and (not health_url or probe_http(health_url))
+        ):
             # Stability window; avoids reporting an immediately-crashing app healthy.
             time.sleep(3)
             container.reload()
             state = container.attrs.get("State", {})
             health = (state.get("Health") or {}).get("Status", "none")
-            if state.get("Status") == "running" and health in {"healthy", "none"}:
+            if (
+                state.get("Status") == "running"
+                and health in {"healthy", "none"}
+                and (not health_url or probe_http(health_url))
+            ):
                 return {
                     "outcome": "success",
                     "healthy": True,
@@ -86,6 +112,8 @@ def run_once(
     health_urls: dict[str, str] | None = None,
     capture_logs: bool = True,
     events=None,
+    executor_url: str = "",
+    executor_token: str = "",
 ):
     if events is not None:
         while True:
@@ -139,13 +167,29 @@ def run_once(
         plan = response.json().get("plan")
         if plan:
             try:
-                result = execute_restart(client, plan, names)
-            except (docker.errors.DockerException, ValueError) as exc:
+                target = client.containers.get(plan["container_id"])
+                result = execute_restart(
+                    client,
+                    plan,
+                    names,
+                    executor_url,
+                    executor_token,
+                    (health_urls or {}).get(target.name, ""),
+                )
+            except (docker.errors.DockerException, ValueError, httpx.HTTPError) as exc:
                 result = {
                     "outcome": "failed",
                     "healthy": False,
                     "detail": type(exc).__name__,
                 }
+            if result["healthy"] and events is not None:
+                # Docker may deliver pre-restart unhealthy events during verification.
+                # Reconciliation below uses current state, not those stale events.
+                while True:
+                    try:
+                        events.get_nowait()
+                    except queue.Empty:
+                        break
             api.post(
                 f"/api/worker/plans/{plan['id']}/result", json=result
             ).raise_for_status()
@@ -169,6 +213,10 @@ def main():
         raise ValueError("HTTP health probe must target one registered container")
     health_urls = {health_name: health_url} if health_name else {}
     capture_logs = os.getenv("HEALOPS_CAPTURE_LOGS", "true").lower() == "true"
+    executor_url = os.getenv("HEALOPS_EXECUTOR_URL", "")
+    executor_token = os.getenv("HEALOPS_EXECUTOR_TOKEN", "")
+    if auto_restart and executor_url and len(executor_token) < 32:
+        raise ValueError("Automatic restart requires the executor token")
     client = docker.from_env()
     wake = threading.Event()
     events = queue.Queue(maxsize=128)
@@ -183,7 +231,15 @@ def main():
         while True:
             try:
                 run_once(
-                    client, api, names, auto_restart, health_urls, capture_logs, events
+                    client,
+                    api,
+                    names,
+                    auto_restart,
+                    health_urls,
+                    capture_logs,
+                    events,
+                    executor_url,
+                    executor_token,
                 )
             except (httpx.HTTPError, docker.errors.DockerException) as exc:
                 print(f"poll failed: {type(exc).__name__}", flush=True)

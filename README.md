@@ -4,7 +4,7 @@
 
 > **Experimental.** Do not connect the worker to a Docker daemon hosting production containers. The Docker socket has host-level authority; the allowlist is application-level, not a security boundary. This demo is bound to localhost and starts in read-only mode.
 
-For an always-on **read-only PW3 monitor** on a shared Docker host, use the separate socket-proxy profile in [continuous monitor setup](docs/continuous-monitor.md). It checks both Docker status and Spring Actuator health, but does not automatically restart or patch code.
+For an always-on PW3 monitor on a shared Docker host, use the separate socket-proxy profile in [continuous monitor setup](docs/continuous-monitor.md). Its optional repair overlay enables bounded restart of exactly one approved Compose service via a separate executor; it does not patch or deploy code.
 
 ## What works today
 
@@ -14,7 +14,7 @@ For an always-on **read-only PW3 monitor** on a shared Docker host, use the sepa
 - Explicit administrator approval and an **additional default-off restart switch** before the worker can claim a structured Docker restart. Basic Docker health/stability verification.
 - Alembic schema, a local broken-app demo, automated Python/React tests and GitHub Actions CI.
 
-**Not implemented:** metrics/deployment history, HTTP recovery checks, Codex worktree patching, GitHub PRs, code diff review, redeployment, rollback, automatic retries/circuit breaker, Kubernetes adapter. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
+**Not implemented:** metrics/deployment history, Codex worktree patching, GitHub PRs, code diff review, redeployment, rollback, automatic code repair, Kubernetes adapter. The isolated executor supports bounded restart and HTTP recovery verification only. [Roadmap](docs/roadmap.md) tracks these separately. The schema includes reserved deployment and verification models but does not imply working deployment/rollback.
 
 ## Architecture
 

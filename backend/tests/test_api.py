@@ -22,6 +22,8 @@ def client():
     settings.healops_worker_token = "test-worker-secret"
     settings.healops_managed_containers = "healops-broken-app"
     settings.healops_auto_restart = False
+    settings.healops_auto_approve_names = ""
+    settings.healops_restart_limit = 2
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -176,3 +178,40 @@ def test_stale_worker_is_not_reported_healthy(client, monkeypatch):
     assert summary["monitor_online"] is False
     assert summary["healthy"] == 0
     assert client.get("/api/containers", headers=ADMIN).json()[0]["status"] == "stale"
+
+
+def test_auto_restart_requires_three_failures_and_exact_name(client):
+    settings.healops_auto_restart = True
+    settings.healops_auto_approve_names = "other-container"
+    for _ in range(3):
+        observe(client, health="unhealthy")
+    assert client.post("/api/worker/claim", headers=WORKER).json()["plan"] is None
+    settings.healops_auto_approve_names = "healops-broken-app"
+    observe(client, health="unhealthy")
+    incident = client.get("/api/incidents", headers=ADMIN).json()[0]
+    assert incident["plan"]["status"] == "approved"
+    assert "auto_approved" in [e["kind"] for e in incident["events"]]
+    assert client.post("/api/worker/claim", headers=WORKER).json()["plan"]["kind"] == "restart"
+
+
+def test_auto_restart_stops_at_hourly_circuit_limit(client):
+    settings.healops_auto_restart = True
+    settings.healops_auto_approve_names = "healops-broken-app"
+    settings.healops_restart_limit = 1
+    for _ in range(3):
+        observe(client, health="unhealthy")
+    first = client.get("/api/incidents", headers=ADMIN).json()[0]
+    claimed = client.post("/api/worker/claim", headers=WORKER).json()["plan"]
+    assert claimed["id"] == first["plan"]["id"]
+    client.post(
+        f"/api/worker/plans/{claimed['id']}/result",
+        headers=WORKER,
+        json={"outcome": "success", "healthy": True},
+    )
+    observe(client, health="healthy")
+    for _ in range(3):
+        observe(client, health="unhealthy")
+    second = client.get("/api/incidents", headers=ADMIN).json()[0]
+    assert second["status"] == "failed"
+    assert second["plan"]["status"] == "blocked"
+    assert client.post("/api/worker/claim", headers=WORKER).json()["plan"] is None

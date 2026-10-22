@@ -79,6 +79,39 @@ def stale(container: Container) -> bool:
     )
 
 
+def maybe_auto_approve(db: Session, incident: Incident, container: Container):
+    if (
+        not settings.healops_auto_restart
+        or container.name not in settings.auto_approve_names
+        or container.failure_streak < 3
+        or incident.status != "proposed"
+    ):
+        return
+    plan = db.scalar(select(RemediationPlan).where(RemediationPlan.incident_id == incident.id))
+    if plan is None or plan.kind != "restart" or plan.status != "proposed":
+        return
+    recent = db.scalar(
+        select(func.count())
+        .select_from(RemediationExecution)
+        .join(RemediationPlan, RemediationExecution.plan_id == RemediationPlan.id)
+        .join(Incident, RemediationPlan.incident_id == Incident.id)
+        .where(
+            Incident.container_name == container.name,
+            RemediationExecution.created_at >= utcnow() - timedelta(hours=1),
+        )
+    )
+    if recent >= settings.healops_restart_limit:
+        incident.status = "failed"
+        plan.status = "blocked"
+        event(db, incident, "circuit_open", "Hourly restart limit reached")
+        return
+    plan.status = "approved"
+    incident.status = "awaiting_approval"
+    db.flush()
+    db.add(Approval(plan_id=plan.id, approved=True, actor="policy"))
+    event(db, incident, "auto_approved", "Registered-container restart after 3 failures")
+
+
 def serialize_incident(db: Session, incident: Incident):
     diagnosis = db.scalar(
         select(Diagnosis).where(Diagnosis.incident_id == incident.id).order_by(Diagnosis.id.desc())
@@ -158,6 +191,7 @@ def observe(data: Observation, db: Session = Depends(get_session)):
     fault = (
         data.status in {"exited", "dead"} and data.exit_code != 0
     ) or data.health == "unhealthy"
+    container.failure_streak = min((container.failure_streak or 0) + 1, 1000) if fault else 0
     active = db.scalar(
         select(Incident)
         .where(Incident.container_id == data.id, Incident.status.in_(OPEN))
@@ -201,6 +235,8 @@ def observe(data: Observation, db: Session = Depends(get_session)):
                     incident_id=incident.id, kind="restart", parameters={"container_id": data.id}
                 )
             )
+        db.flush()
+        maybe_auto_approve(db, incident, container)
         db.commit()
         return {"incident_id": incident.id, "created": True}
     if (
@@ -216,6 +252,8 @@ def observe(data: Observation, db: Session = Depends(get_session)):
         for plan in pending:
             if plan.status in {"proposed", "approved"}:
                 plan.status = "cancelled"
+    if fault and active is not None:
+        maybe_auto_approve(db, active, container)
     db.commit()
     return {"incident_id": active.id if active else None, "created": False}
 
@@ -281,6 +319,7 @@ def public_settings():
     return {
         "managed_containers": sorted(settings.allowed_names),
         "auto_restart": settings.healops_auto_restart,
+        "auto_approve_names": sorted(settings.auto_approve_names),
         "restart_limit": settings.healops_restart_limit,
         "llm_configured": bool(
             settings.llm_base_url and settings.llm_model and settings.llm_api_key
